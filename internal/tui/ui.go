@@ -28,22 +28,81 @@ func NewUI(db *sqlx.DB) *UI {
 		app:     tview.NewApplication(),
 		db:      db,
 		list:    tview.NewList().ShowSecondaryText(true),
-		details: tview.NewTextView().SetDynamicColors(true).SetWrap(true),
+		details: tview.NewTextView(),
 	}
 
-	ui.list.SetBorder(true).SetTitle(" Scripts ")
-	ui.details.SetBorder(true).SetTitle(" Details ")
+	ui.details.
+		SetDynamicColors(true).
+		SetWrap(true).
+		SetScrollable(true).
+		SetRegions(true).
+		SetChangedFunc(func() {
+			ui.app.Draw()
+		})
+
+	ui.list.SetBorder(true).SetTitle(" Scripts ").SetBorderColor(tcell.ColorYellow)
+	ui.details.SetBorder(true).SetTitle(" Details (↑/↓ Scroll) ").SetBorderColor(tcell.ColorWhite)
+
+	// Initialize pane focusing clearly with tab switching
+	currentFocus := 0
+	focusItems := []tview.Primitive{ui.list, ui.details}
 
 	ui.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyCtrlQ {
 			ui.app.Stop()
 			return nil
 		}
+
+		if event.Key() == tcell.KeyTab {
+			currentFocus = (currentFocus + 1) % len(focusItems)
+			ui.app.SetFocus(focusItems[currentFocus])
+
+			if currentFocus == 0 {
+				ui.list.SetBorderColor(tcell.ColorYellow)
+				ui.details.SetBorderColor(tcell.ColorWhite)
+			} else {
+				ui.list.SetBorderColor(tcell.ColorWhite)
+				ui.details.SetBorderColor(tcell.ColorYellow)
+			}
+
+			return nil
+		}
+
 		return event
 	})
 
+	// Scroll control for details pane clearly
+	ui.details.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		row, col := ui.details.GetScrollOffset()
+		switch event.Key() {
+		case tcell.KeyDown:
+			ui.details.ScrollTo(row+1, col)
+			return nil
+		case tcell.KeyUp:
+			if row > 0 {
+				ui.details.ScrollTo(row-1, col)
+			}
+			return nil
+		case tcell.KeyPgDn:
+			ui.details.ScrollTo(row+10, col)
+			return nil
+		case tcell.KeyPgUp:
+			if row >= 10 {
+				ui.details.ScrollTo(row-10, col)
+			} else {
+				ui.details.ScrollToBeginning()
+			}
+			return nil
+		}
+		return event
+	})
+
+	// Set initial focus explicitly to the script list
+	ui.app.SetFocus(ui.list)
+
 	return ui
 }
+
 
 func (ui *UI) loadScripts() {
 	scripts, err := database.GetScripts(ui.db)
@@ -167,7 +226,6 @@ func (ui *UI) Run() error {
 	ui.loadScripts()
 
 	ui.list.SetBorder(true).SetTitle("Scripts (Press [green]C[white]=Create, [red]D[white]=Delete)")
-	ui.details.SetBorder(true).SetTitle("Details")
 
 	ui.list.SetDoneFunc(func() {
 		ui.app.Stop()
@@ -226,7 +284,14 @@ func (ui *UI) promptPlaceholderInputs(script database.Script, placeholders []str
 }
 
 func (ui *UI) runAndDisplay(scriptContent string) {
-	outputView := tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
+	outputView := tview.NewTextView().
+		SetDynamicColors(true).
+		SetScrollable(true).
+		SetRegions(true).
+		SetWrap(true).
+		SetChangedFunc(func() {
+			ui.app.Draw() // Redraw the output view when it changes
+		})
 
 	outputView.SetBorder(true).SetTitle("Execution Output (Press [yellow]Q[white] to quit)")
 
