@@ -21,6 +21,8 @@ type UI struct {
 	list    *tview.List
 	details *tview.TextView
 	root    tview.Primitive // root primitive
+	footer  *tview.TextView  // clearly added footer
+	inForm  bool
 }
 
 func NewUI(db *sqlx.DB) *UI {
@@ -43,65 +45,17 @@ func NewUI(db *sqlx.DB) *UI {
 	ui.list.SetBorder(true).SetTitle(" Scripts ").SetBorderColor(tcell.ColorYellow)
 	ui.details.SetBorder(true).SetTitle(" Details (↑/↓ Scroll) ").SetBorderColor(tcell.ColorWhite)
 
-	// Initialize pane focusing clearly with tab switching
-	currentFocus := 0
-	focusItems := []tview.Primitive{ui.list, ui.details}
+	ui.footer = tview.NewTextView()
+	ui.footer.SetDynamicColors(true).
+		SetTextAlign(tview.AlignCenter).
+		SetText("[yellow]Tab[white]: Switch Pane | [green]C[white]: Create Script | [red]D[white]: Delete Script | [blue]E[white]: Execute Script | [cyan]Ctrl+Q[white]: Quit")
 
-	ui.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyCtrlQ {
-			ui.app.Stop()
-			return nil
-		}
-
-		if event.Key() == tcell.KeyTab {
-			currentFocus = (currentFocus + 1) % len(focusItems)
-			ui.app.SetFocus(focusItems[currentFocus])
-
-			if currentFocus == 0 {
-				ui.list.SetBorderColor(tcell.ColorYellow)
-				ui.details.SetBorderColor(tcell.ColorWhite)
-			} else {
-				ui.list.SetBorderColor(tcell.ColorWhite)
-				ui.details.SetBorderColor(tcell.ColorYellow)
-			}
-
-			return nil
-		}
-
-		return event
-	})
-
-	// Scroll control for details pane clearly
-	ui.details.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		row, col := ui.details.GetScrollOffset()
-		switch event.Key() {
-		case tcell.KeyDown:
-			ui.details.ScrollTo(row+1, col)
-			return nil
-		case tcell.KeyUp:
-			if row > 0 {
-				ui.details.ScrollTo(row-1, col)
-			}
-			return nil
-		case tcell.KeyPgDn:
-			ui.details.ScrollTo(row+10, col)
-			return nil
-		case tcell.KeyPgUp:
-			if row >= 10 {
-				ui.details.ScrollTo(row-10, col)
-			} else {
-				ui.details.ScrollToBeginning()
-			}
-			return nil
-		}
-		return event
-	})
-
-	// Set initial focus explicitly to the script list
-	ui.app.SetFocus(ui.list)
+	// Call SetBorder separately to avoid type mismatch
+	ui.footer.SetBorder(true).SetBorderColor(tcell.ColorGray)
 
 	return ui
 }
+
 
 
 func (ui *UI) loadScripts() {
@@ -165,6 +119,8 @@ func (ui *UI) confirmDeleteScript() {
 
 
 func (ui *UI) showCreateForm() {
+	ui.inForm = true
+
 	var scriptContent string // temporarily store edited content here
 
 	form := tview.NewForm()
@@ -187,6 +143,7 @@ func (ui *UI) showCreateForm() {
 			description := form.GetFormItemByLabel("Description").(*tview.InputField).GetText()
 
 			if scriptContent == "" {
+				ui.inForm = false
 				ui.details.SetText("[red]Script content cannot be empty. Please edit script content first.")
 				return
 			}
@@ -198,9 +155,11 @@ func (ui *UI) showCreateForm() {
 				ui.loadScripts()
 				ui.details.SetText("[green]Script created successfully.")
 			}
+			ui.inForm = false
 			ui.app.SetRoot(ui.root, true)
 		}).
 		AddButton("Cancel", func() {
+			ui.inForm = false
 			ui.app.SetRoot(ui.root, true)
 		})
 
@@ -208,37 +167,66 @@ func (ui *UI) showCreateForm() {
 	ui.app.SetRoot(form, true)
 }
 
-
-func (ui *UI) handleKeys(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Rune() {
-	case 'C', 'c':
-		ui.showCreateForm()
-	case 'D', 'd':
-		ui.confirmDeleteScript()
-	case 'E', 'e':
-		ui.executeSelectedScript()
-	}
-
-	return event
-}
-
 func (ui *UI) Run() error {
 	ui.loadScripts()
 
-	ui.list.SetBorder(true).SetTitle("Scripts (Press [green]C[white]=Create, [red]D[white]=Delete)")
-
-	ui.list.SetDoneFunc(func() {
-		ui.app.Stop()
-	})
-
-	ui.list.SetInputCapture(ui.handleKeys)
-
-	ui.root = tview.NewFlex().
+	mainLayout := tview.NewFlex().
 		AddItem(ui.list, 0, 1, true).
 		AddItem(ui.details, 0, 2, false)
 
+	// Explicit footer setup (fixed height: 1 or 3 lines, clearly visible)
+	ui.footer.SetBorder(true).SetBorderColor(tcell.ColorGray)
+
+	ui.root = tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(mainLayout, 0, 1, true).
+		AddItem(ui.footer, 3, 0, false) // explicitly give footer height=1, fixed height
+
+	ui.app.SetFocus(ui.list)
+
+	currentFocus := 0
+	focusItems := []tview.Primitive{ui.list, ui.details}
+
+	ui.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if ui.inForm {
+			return event
+		}
+
+		if event.Key() == tcell.KeyCtrlQ {
+			ui.app.Stop()
+			return nil
+		}
+		if event.Key() == tcell.KeyTab {
+			currentFocus = (currentFocus + 1) % len(focusItems)
+			ui.app.SetFocus(focusItems[currentFocus])
+
+			if currentFocus == 0 {
+				ui.list.SetBorderColor(tcell.ColorYellow)
+				ui.details.SetBorderColor(tcell.ColorWhite)
+			} else {
+				ui.list.SetBorderColor(tcell.ColorWhite)
+				ui.details.SetBorderColor(tcell.ColorYellow)
+			}
+
+			return nil
+		}
+
+		switch event.Rune() {
+			case 'C', 'c':
+				ui.showCreateForm()
+			case 'D', 'd':
+				ui.confirmDeleteScript()
+			case 'E', 'e':
+				ui.executeSelectedScript()
+			}
+
+			return event
+		})
+
 	return ui.app.SetRoot(ui.root, true).Run()
 }
+
+
+
 
 func (ui *UI) executeSelectedScript() {
 	index := ui.list.GetCurrentItem()
