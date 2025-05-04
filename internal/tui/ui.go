@@ -7,6 +7,8 @@ import (
 	"github.com/rivo/tview"
 	"github.com/maccalsa/bashhub/internal/database"
 	"github.com/maccalsa/bashhub/internal/executor"
+	"os"
+	"os/exec"
 )
 
 type UI struct {
@@ -95,17 +97,33 @@ func (ui *UI) confirmDeleteScript() {
 
 
 func (ui *UI) showCreateForm() {
+	var scriptContent string // temporarily store edited content here
+
 	form := tview.NewForm()
 
-	form.AddInputField("Name", "", 20, nil, nil).
+	form.
+		AddInputField("Name", "", 20, nil, nil).
 		AddInputField("Description", "", 40, nil, nil).
-		AddTextArea("Content", "", 60, 10, 0, nil).
+		AddButton("Edit Content", func() {
+			// After editing completes, your TUI restores control, completely avoiding the terminal output leak.
+			content, err := launchEditor(ui.app, scriptContent)
+			if err != nil {
+				ui.details.SetText(fmt.Sprintf("[red]Editor error: %v", err))
+			} else {
+				scriptContent = content
+				form.GetButton(form.GetButtonCount()-3).SetLabel("Edit Content ✔️")
+			}
+		}).
 		AddButton("Save", func() {
 			name := form.GetFormItemByLabel("Name").(*tview.InputField).GetText()
 			description := form.GetFormItemByLabel("Description").(*tview.InputField).GetText()
-			content := form.GetFormItemByLabel("Content").(*tview.TextArea).GetText()
 
-			script := database.Script{Name: name, Description: description, Content: content}
+			if scriptContent == "" {
+				ui.details.SetText("[red]Script content cannot be empty. Please edit script content first.")
+				return
+			}
+
+			script := database.Script{Name: name, Description: description, Content: scriptContent}
 			if err := database.CreateScript(ui.db, script); err != nil {
 				ui.details.SetText(fmt.Sprintf("[red]Failed to create script: %v", err))
 			} else {
@@ -121,6 +139,7 @@ func (ui *UI) showCreateForm() {
 	form.SetBorder(true).SetTitle("New Script").SetTitleAlign(tview.AlignLeft)
 	ui.app.SetRoot(form, true)
 }
+
 
 func (ui *UI) handleKeys(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Rune() {
@@ -223,4 +242,41 @@ func (ui *UI) runAndDisplay(scriptContent string) {
 	})
 
 	ui.app.SetRoot(outputView, true)
+}
+
+func launchEditor(app *tview.Application, initialContent string) (string, error) {
+	// Suspend the tview Application (restore terminal state)
+	app.Suspend(func() {
+		tmpfile, err := os.CreateTemp("", "bashhub-*.sh")
+		if err != nil {
+			return
+		}
+		defer os.Remove(tmpfile.Name())
+
+		tmpfile.Write([]byte(initialContent))
+		tmpfile.Close()
+
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "nano" // default fallback
+		}
+
+		cmd := exec.Command(editor, tmpfile.Name())
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			return
+		}
+
+		updatedContent, err := os.ReadFile(tmpfile.Name())
+		if err != nil {
+			return
+		}
+
+		initialContent = string(updatedContent)
+	})
+
+	return initialContent, nil
 }
