@@ -9,6 +9,10 @@ import (
 	"github.com/maccalsa/bashhub/internal/executor"
 	"os"
 	"os/exec"
+	"github.com/alecthomas/chroma/v2/formatters"
+	"github.com/alecthomas/chroma/v2/lexers"
+	"github.com/alecthomas/chroma/v2/styles"
+	"bytes"
 )
 
 type UI struct {
@@ -59,7 +63,12 @@ func (ui *UI) loadScripts() {
 	for idx, script := range scripts {
 		script := script // capture loop variable
 		ui.list.AddItem(script.Name, script.Description, 0, func() {
-			ui.details.SetText(fmt.Sprintf("[yellow]%s\n\n[white]%s", script.Name, script.Content))
+		ui.details.Clear()
+		ui.details.
+			SetDynamicColors(true).
+			SetRegions(true).
+			SetWrap(true).
+			SetText(tview.TranslateANSI(highlightCode(script.Content, "bash")))
 		})
 		if idx == 0 {
 			ui.details.SetText(fmt.Sprintf("[yellow]%s\n\n[white]%s", script.Name, script.Content))
@@ -279,4 +288,34 @@ func launchEditor(app *tview.Application, initialContent string) (string, error)
 	})
 
 	return initialContent, nil
+}
+
+func highlightCode(code, language string) string {
+	lexer := lexers.Get(language)
+	if lexer == nil {
+		lexer = lexers.Fallback
+	}
+
+	style := styles.Get("monokai")
+	if style == nil {
+		style = styles.Fallback
+	}
+
+	formatter := formatters.Get("terminal16m")
+	if formatter == nil {
+		formatter = formatters.Fallback
+	}
+
+	iterator, err := lexer.Tokenise(nil, code)
+	if err != nil {
+		return code // fallback to plain code
+	}
+
+	var buff bytes.Buffer
+	err = formatter.Format(&buff, style, iterator)
+	if err != nil {
+		return code
+	}
+
+	return buff.String()
 }
