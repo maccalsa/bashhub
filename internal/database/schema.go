@@ -23,6 +23,7 @@ func ConnectDB() *sqlx.DB {
 
 	db.MustExec(Schema)
 
+	//db.MustExec("ALTER TABLE scripts ADD COLUMN language TEXT DEFAULT 'bash';")
 	// db.MustExec("ALTER TABLE scripts ADD COLUMN category TEXT DEFAULT 'General';")
 	// db.MustExec("INSERT INTO scripts (name, description, content) VALUES ('Hello World', 'Test script', 'echo Hello World'), ('Date', 'Print current date', 'date');")
 

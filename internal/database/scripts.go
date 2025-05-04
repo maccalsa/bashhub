@@ -10,6 +10,7 @@ type Script struct {
 	Description string `db:"description"`
 	Content     string `db:"content"`
 	Category    string `db:"category"`
+	Language    string `db:"language"`
 }
 
 // CreateScript adds a new script to the database

@@ -82,7 +82,7 @@ func (ui *UI) loadScripts() {
 			node.SetExpanded(!node.IsExpanded())
 		} else {
 			script := ref.(database.Script)
-			ui.details.SetText(highlightCode(script.Content, "bash"))
+			ui.details.SetText(highlightCode(script.Content, script.Language))
 		}
 	})
 }
@@ -165,6 +165,7 @@ func (ui *UI) showEditForm() {
 			script.Description = description
 			script.Category = category
 			script.Content = scriptContent
+			script.Language = detectLanguage(scriptContent)
 
 			if err := database.UpdateScript(ui.db, script); err != nil {
 				ui.details.SetText(fmt.Sprintf("[red]Failed to update script: %v", err))
@@ -219,11 +220,15 @@ func (ui *UI) showCreateForm() {
 				return
 			}
 
+		    language := detectLanguage(scriptContent) // automatic detection clearly here
+
+
 			script := database.Script{
 				Name: name, 
 				Description: description, 
 				Content: scriptContent,
 				Category: category,
+				Language: language,
 			}
 
 			if err := database.CreateScript(ui.db, script); err != nil {
@@ -481,4 +486,15 @@ func highlightCode(code, language string) string {
 	}
 
 	return tview.TranslateANSI(buff.String())
+}
+
+func detectLanguage(scriptContent string) string {
+    lexer := lexers.Analyse(scriptContent)
+    if lexer == nil {
+        lexer = lexers.Match(scriptContent)
+    }
+    if lexer == nil {
+        return "bash" // clearly fallback to bash
+    }
+    return lexer.Config().Name
 }
