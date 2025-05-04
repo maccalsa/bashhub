@@ -488,7 +488,7 @@ func highlightCode(code, language string) string {
 	return tview.TranslateANSI(buff.String())
 }
 
-func detectLanguage(scriptContent string) string {
+func DetectLanguage(scriptContent string) string {
     lexer := lexers.Analyse(scriptContent)
     if lexer == nil {
         lexer = lexers.Match(scriptContent)
