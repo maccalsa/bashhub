@@ -6,6 +6,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/rivo/tview"
 	"github.com/maccalsa/bashhub/internal/database"
+	"github.com/maccalsa/bashhub/internal/executor"
 )
 
 type UI struct {
@@ -119,7 +120,10 @@ func (ui *UI) handleKeys(event *tcell.EventKey) *tcell.EventKey {
 		ui.showCreateForm()
 	case 'D', 'd':
 		ui.confirmDeleteScript()
+	case 'E', 'e':
+		ui.executeSelectedScript()
 	}
+
 	return event
 }
 
@@ -140,4 +144,75 @@ func (ui *UI) Run() error {
 		AddItem(ui.details, 0, 2, false)
 
 	return ui.app.SetRoot(ui.root, true).Run()
+}
+
+func (ui *UI) executeSelectedScript() {
+	index := ui.list.GetCurrentItem()
+	if index < 0 {
+		return
+	}
+
+	scripts, err := database.GetScripts(ui.db)
+	if err != nil {
+		ui.details.SetText(fmt.Sprintf("[red]Failed to load scripts: %v", err))
+		return
+	}
+
+	script := scripts[index]
+
+	placeholders := executor.ParsePlaceholders(script.Content)
+	if len(placeholders) > 0 {
+		ui.promptPlaceholderInputs(script, placeholders)
+	} else {
+		ui.runAndDisplay(script.Content)
+	}
+}
+
+func (ui *UI) promptPlaceholderInputs(script database.Script, placeholders []string) {
+	inputs := make(map[string]string)
+	form := tview.NewForm()
+
+	for _, ph := range placeholders {
+		form.AddInputField(ph, "", 30, nil, func(text string) {
+			inputs[ph] = text
+		})
+	}
+
+	form.AddButton("Run", func() {
+		finalScript := executor.ReplacePlaceholders(script.Content, inputs)
+		ui.runAndDisplay(finalScript)
+	}).AddButton("Cancel", func() {
+		ui.app.SetRoot(ui.root, true)
+	})
+
+	form.SetBorder(true).SetTitle("Fill placeholders").SetTitleAlign(tview.AlignLeft)
+	ui.app.SetRoot(form, true)
+}
+
+func (ui *UI) runAndDisplay(scriptContent string) {
+	outputView := tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
+
+	outputView.SetBorder(true).SetTitle("Execution Output (Press [yellow]Q[white] to quit)")
+
+	go func() {
+		executor.ExecuteScript(scriptContent, func(line string) {
+			ui.app.QueueUpdateDraw(func() {
+				fmt.Fprintln(outputView, line)
+			})
+		})
+	}()
+
+	outputView.SetDoneFunc(func(key tcell.Key) {
+		ui.app.SetRoot(ui.root, true)
+	})
+
+	outputView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Rune() == 'q' || event.Rune() == 'Q' {
+			ui.app.SetRoot(ui.root, true)
+			return nil
+		}
+		return event
+	})
+
+	ui.app.SetRoot(outputView, true)
 }
