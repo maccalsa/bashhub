@@ -28,6 +28,14 @@ func NewUI(db *sqlx.DB) *UI {
 	ui.list.SetBorder(true).SetTitle(" Scripts ")
 	ui.details.SetBorder(true).SetTitle(" Details ")
 
+	ui.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyCtrlQ {
+			ui.app.Stop()
+			return nil
+		}
+		return event
+	})
+
 	return ui
 }
 
