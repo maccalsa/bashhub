@@ -273,7 +273,14 @@ func (ui *UI) Run() error {
 				ui.app.SetFocus(ui.tree)
 			}
 			return nil
-		}
+		case tcell.KeyBacktab: // Shift+Tab clearly goes backward
+			if ui.app.GetFocus() == ui.details {
+				ui.app.SetFocus(ui.tree)
+			} else {
+				ui.app.SetFocus(ui.details)
+			}
+			return nil
+		}	
 
 		switch event.Rune() {
 		case 'C', 'c':
@@ -456,14 +463,15 @@ func highlightCode(code, language string) string {
 		style = styles.Fallback
 	}
 
-	formatter := formatters.Get("terminal16m")
+	// Explicitly switch to the robust terminal256 formatter for broader compatibility.
+	formatter := formatters.Get("terminal256")
 	if formatter == nil {
 		formatter = formatters.Fallback
 	}
 
 	iterator, err := lexer.Tokenise(nil, code)
 	if err != nil {
-		return code // fallback to plain code
+		return code
 	}
 
 	var buff bytes.Buffer
@@ -472,5 +480,5 @@ func highlightCode(code, language string) string {
 		return code
 	}
 
-	return buff.String()
+	return tview.TranslateANSI(buff.String())
 }
