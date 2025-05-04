@@ -66,10 +66,15 @@ func (ui *UI) loadScripts() {
 	}
 
 	ui.list.Clear()
-	ui.listItemIDs = make(map[int]int64) // reset clearly on reload
+	ui.listItemIDs = make(map[int]int64)
+
+	ui.list.SetMainTextColor(tcell.ColorWhite).
+		SetSecondaryTextColor(tcell.ColorDarkSlateGray).
+		SetSelectedBackgroundColor(tcell.ColorBlue).
+		SetSelectedTextColor(tcell.ColorBlack)
 
 	if len(scripts) == 0 {
-		ui.list.AddItem("No scripts found", "", 0, nil)
+		ui.list.AddItem("[yellow]No scripts found", "", 0, nil)
 		ui.details.SetText("[yellow]No scripts to display. Add scripts to the database.")
 		return
 	}
@@ -80,13 +85,15 @@ func (ui *UI) loadScripts() {
 	}
 
 	for category, scripts := range catMap {
-		ui.list.AddItem(fmt.Sprintf("[::b][+] %s", category), "", 0, nil)
+		// Clearly styled category header
+		ui.list.AddItem(fmt.Sprintf("[yellow::b]%s", category), "", 0, nil)
 
 		for _, script := range scripts {
 			script := script
 
 			index := ui.list.GetItemCount()
-			ui.list.AddItem("  "+script.Name, script.Description, 0, func() {
+
+			ui.list.AddItem(fmt.Sprintf("  [green]%s", script.Name), fmt.Sprintf("[gray]%s", script.Description), 0, func() {
 				ui.details.Clear()
 				ui.details.
 					SetDynamicColors(true).
@@ -95,10 +102,12 @@ func (ui *UI) loadScripts() {
 					SetText(tview.TranslateANSI(highlightCode(script.Content, "bash")))
 			})
 
-			ui.listItemIDs[index] = script.ID // explicitly map index → ID clearly
+			ui.listItemIDs[index] = script.ID
 		}
 	}
 }
+
+
 
 
 func (ui *UI) confirmDeleteScript() {
