@@ -18,64 +18,41 @@ import (
 type UI struct {
 	app     *tview.Application
 	db      *sqlx.DB
-	list    *tview.List
+	tree    *tview.TreeView
 	details *tview.TextView
 	root    tview.Primitive // root primitive
 	footer  *tview.TextView  // clearly added footer
 	inForm  bool
-	listItemIDs map[int]int64  // clearly maps list index to script ID
 }
 
 func NewUI(db *sqlx.DB) *UI {
 	ui := &UI{
 		app:     tview.NewApplication(),
 		db:      db,
-		list:    tview.NewList().ShowSecondaryText(true),
-		details: tview.NewTextView(),
-		listItemIDs: make(map[int]int64),
+		tree:    tview.NewTreeView(),
+		details: tview.NewTextView().SetDynamicColors(true),
 	}
 
-	ui.details.
-		SetDynamicColors(true).
-		SetWrap(true).
-		SetScrollable(true).
-		SetRegions(true).
-		SetChangedFunc(func() {
-			ui.app.Draw()
-		})
-
-	ui.list.SetBorder(true).SetTitle(" Scripts ").SetBorderColor(tcell.ColorYellow)
-	ui.details.SetBorder(true).SetTitle(" Details (↑/↓ Scroll) ").SetBorderColor(tcell.ColorWhite)
+	ui.tree.SetBorder(true).SetTitle(" Scripts ")
+	ui.details.SetBorder(true).SetTitle(" Details (↑/↓ Scroll) ")
 
 	ui.footer = tview.NewTextView()
 	ui.footer.SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter).
 		SetText("[yellow]Tab[white]: Switch Pane | [green]C[white]: Create Script | [orange]X[white]: Edit Script | [red]D[white]: Delete Script | [blue]E[white]: Execute Script | [cyan]Ctrl+Q[white]: Quit")
 
-	// Call SetBorder separately to avoid type mismatch
 	ui.footer.SetBorder(true).SetBorderColor(tcell.ColorGray)
 
 	return ui
 }
 
 func (ui *UI) loadScripts() {
+	rootNode := tview.NewTreeNode("Scripts").SetColor(tcell.ColorYellow)
+	ui.tree.SetRoot(rootNode).SetCurrentNode(rootNode)
+
 	scripts, err := database.GetScripts(ui.db)
 	if err != nil {
 		ui.details.SetText(fmt.Sprintf("[red]Error loading scripts: %v", err))
-		return
-	}
-
-	ui.list.Clear()
-	ui.listItemIDs = make(map[int]int64)
-
-	ui.list.SetMainTextColor(tcell.ColorWhite).
-		SetSecondaryTextColor(tcell.ColorDarkSlateGray).
-		SetSelectedBackgroundColor(tcell.ColorBlue).
-		SetSelectedTextColor(tcell.ColorBlack)
-
-	if len(scripts) == 0 {
-		ui.list.AddItem("[yellow]No scripts found", "", 0, nil)
-		ui.details.SetText("[yellow]No scripts to display. Add scripts to the database.")
 		return
 	}
 
@@ -85,51 +62,55 @@ func (ui *UI) loadScripts() {
 	}
 
 	for category, scripts := range catMap {
-		// Clearly styled category header
-		ui.list.AddItem(fmt.Sprintf("[yellow::b]%s", category), "", 0, nil)
+		catNode := tview.NewTreeNode(category).
+			SetColor(tcell.ColorGreen)
 
 		for _, script := range scripts {
-			script := script
-
-			index := ui.list.GetItemCount()
-
-			ui.list.AddItem(fmt.Sprintf("  [green]%s", script.Name), fmt.Sprintf("[gray]%s", script.Description), 0, func() {
-				ui.details.Clear()
-				ui.details.
-					SetDynamicColors(true).
-					SetRegions(true).
-					SetWrap(true).
-					SetText(tview.TranslateANSI(highlightCode(script.Content, "bash")))
-			})
-
-			ui.listItemIDs[index] = script.ID
+			script := script // capture clearly
+			scriptNode := tview.NewTreeNode(script.Name).
+				SetReference(script).
+				SetColor(tcell.ColorWhite).
+				SetSelectable(true)
+			catNode.AddChild(scriptNode)
 		}
+		rootNode.AddChild(catNode)
 	}
+
+	ui.tree.SetSelectedFunc(func(node *tview.TreeNode) {
+		ref := node.GetReference()
+		if ref == nil {
+			node.SetExpanded(!node.IsExpanded())
+		} else {
+			script := ref.(database.Script)
+			ui.details.SetText(highlightCode(script.Content, "bash"))
+		}
+	})
 }
 
-
-
-
 func (ui *UI) confirmDeleteScript() {
-	index := ui.list.GetCurrentItem()
-	if index < 0 {
+	node := ui.tree.GetCurrentNode()
+	if node == nil {
 		return
 	}
 
-	name, _ := ui.list.GetItemText(index)
+	ref := node.GetReference()
+	if ref == nil {
+		ui.details.SetText("[red]Cannot delete category. Please select a script.")
+		return
+	}
+
+	script := ref.(database.Script)
 
 	modal := tview.NewModal().
-		SetText(fmt.Sprintf("Delete script '%s'?", name)).
+		SetText(fmt.Sprintf("Delete script '%s'?", script.Name)).
 		AddButtons([]string{"Cancel", "Delete"}).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 			if buttonLabel == "Delete" {
-				scripts, _ := database.GetScripts(ui.db)
-				scriptID := scripts[index].ID
-				if err := database.DeleteScript(ui.db, scriptID); err != nil {
+				if err := database.DeleteScript(ui.db, script.ID); err != nil {
 					ui.details.SetText(fmt.Sprintf("[red]Failed to delete script: %v", err))
 				} else {
 					ui.loadScripts()
-					ui.details.SetText("[green]Script deleted.")
+					ui.details.SetText("[green]Script deleted successfully.")
 				}
 			}
 			ui.app.SetRoot(ui.root, true)
@@ -138,23 +119,20 @@ func (ui *UI) confirmDeleteScript() {
 	ui.app.SetRoot(modal, false)
 }
 
+
 func (ui *UI) showEditForm() {
-	index := ui.list.GetCurrentItem()
-	if index < 0 {
+	node := ui.tree.GetCurrentNode()
+	if node == nil {
 		return
 	}
 
-	scriptID, ok := ui.listItemIDs[index]
-	if !ok {
-		ui.details.SetText("[red]Cannot edit category header. Please select a valid script.")
+	ref := node.GetReference()
+	if ref == nil {
+		ui.details.SetText("[red]Cannot edit category. Please select a script.")
 		return
 	}
 
-	script, err := database.GetScriptByID(ui.db, scriptID)
-	if err != nil {
-		ui.details.SetText("[red]Failed to load script for editing.")
-		return
-	}
+	script := ref.(database.Script)
 
 	ui.inForm = true
 	form := tview.NewForm()
@@ -205,6 +183,7 @@ func (ui *UI) showEditForm() {
 	form.SetBorder(true).SetTitle("Edit Script").SetTitleAlign(tview.AlignLeft)
 	ui.app.SetRoot(form, true)
 }
+
 
 
 
@@ -269,79 +248,69 @@ func (ui *UI) Run() error {
 	ui.loadScripts()
 
 	mainLayout := tview.NewFlex().
-		AddItem(ui.list, 0, 1, true).
+		AddItem(ui.tree, 0, 1, true).
 		AddItem(ui.details, 0, 2, false)
-
-	// Explicit footer setup (fixed height: 1 or 3 lines, clearly visible)
-	ui.footer.SetBorder(true).SetBorderColor(tcell.ColorGray)
 
 	ui.root = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(mainLayout, 0, 1, true).
-		AddItem(ui.footer, 3, 0, false) // explicitly give footer height=1, fixed height
+		AddItem(ui.footer, 3, 0, false)
 
-	ui.app.SetFocus(ui.list)
-
-	currentFocus := 0
-	focusItems := []tview.Primitive{ui.list, ui.details}
+	ui.app.SetFocus(ui.tree)
 
 	ui.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if ui.inForm {
 			return event
 		}
 
-		if event.Key() == tcell.KeyCtrlQ {
+		switch event.Key() {
+		case tcell.KeyCtrlQ:
 			ui.app.Stop()
 			return nil
-		}
-		if event.Key() == tcell.KeyTab {
-			currentFocus = (currentFocus + 1) % len(focusItems)
-			ui.app.SetFocus(focusItems[currentFocus])
-
-			if currentFocus == 0 {
-				ui.list.SetBorderColor(tcell.ColorYellow)
-				ui.details.SetBorderColor(tcell.ColorWhite)
+		case tcell.KeyTab:
+			if ui.app.GetFocus() == ui.tree {
+				ui.app.SetFocus(ui.details)
 			} else {
-				ui.list.SetBorderColor(tcell.ColorWhite)
-				ui.details.SetBorderColor(tcell.ColorYellow)
+				ui.app.SetFocus(ui.tree)
 			}
-
 			return nil
 		}
 
 		switch event.Rune() {
-			case 'C', 'c':
-				ui.showCreateForm()
-			case 'D', 'd':
-				ui.confirmDeleteScript()
-			case 'E', 'e':
-				ui.executeSelectedScript()
-			case 'X', 'x':
-				ui.showEditForm() // clearly new Edit action
-				return nil
-			}
+		case 'C', 'c':
+			ui.showCreateForm()
+			return nil
+		case 'D', 'd':
+			ui.confirmDeleteScript()
+			return nil
+		case 'E', 'e':
+			ui.executeSelectedScript()
+			return nil
+		case 'X', 'x':
+			ui.showEditForm()
+			return nil
+		}
 
-			return event
-		})
+		return event
+	})
 
 	return ui.app.SetRoot(ui.root, true).Run()
 }
 
 
-
-
 func (ui *UI) executeSelectedScript() {
-	index := ui.list.GetCurrentItem()
-	if index < 0 {
+	node := ui.tree.GetCurrentNode()
+	if node == nil {
+		ui.details.SetText("[red]No script selected.")
 		return
 	}
 
-	scripts, err := database.GetScripts(ui.db)
-	if err != nil {
-		ui.details.SetText(fmt.Sprintf("[red]Failed to load scripts: %v", err))
+	ref := node.GetReference()
+	if ref == nil {
+		ui.details.SetText("[red]Please select a valid script (not a category).")
 		return
 	}
 
-	script := scripts[index]
+	script := ref.(database.Script)
 
 	placeholders := executor.ParsePlaceholders(script.Content)
 	if len(placeholders) > 0 {
@@ -350,6 +319,7 @@ func (ui *UI) executeSelectedScript() {
 		ui.runAndDisplay(script.Content)
 	}
 }
+
 
 func (ui *UI) promptPlaceholderInputs(script database.Script, placeholders []string) {
 	inputs := make(map[string]string)
