@@ -165,7 +165,7 @@ func (ui *UI) showEditForm() {
 			script.Description = description
 			script.Category = category
 			script.Content = scriptContent
-			script.Language = detectLanguage(scriptContent)
+			script.Language = DetectLanguage(scriptContent)
 
 			if err := database.UpdateScript(ui.db, script); err != nil {
 				ui.details.SetText(fmt.Sprintf("[red]Failed to update script: %v", err))
@@ -220,7 +220,7 @@ func (ui *UI) showCreateForm() {
 				return
 			}
 
-		    language := detectLanguage(scriptContent) // automatic detection clearly here
+		    language := DetectLanguage(scriptContent) // automatic detection clearly here
 
 
 			script := database.Script{
