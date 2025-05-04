@@ -284,39 +284,70 @@ func (ui *UI) promptPlaceholderInputs(script database.Script, placeholders []str
 }
 
 func (ui *UI) runAndDisplay(scriptContent string) {
-	outputView := tview.NewTextView().
+	outputView := tview.NewTextView()
+	outputView.
 		SetDynamicColors(true).
 		SetScrollable(true).
 		SetRegions(true).
 		SetWrap(true).
 		SetChangedFunc(func() {
-			ui.app.Draw() // Redraw the output view when it changes
-		})
-
-	outputView.SetBorder(true).SetTitle("Execution Output (Press [yellow]Q[white] to quit)")
-
-	go func() {
-		executor.ExecuteScript(scriptContent, func(line string) {
 			ui.app.QueueUpdateDraw(func() {
-				fmt.Fprintln(outputView, line)
+				outputView.ScrollToEnd()
 			})
 		})
-	}()
 
-	outputView.SetDoneFunc(func(key tcell.Key) {
-		ui.app.SetRoot(ui.root, true)
-	})
+	outputView.SetBorder(true).SetTitle("Execution Output (↑/↓ Scroll) | Press Q to Quit").SetBorderColor(tcell.ColorGreen)
 
 	outputView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		row, col := outputView.GetScrollOffset()
+		switch event.Key() {
+		case tcell.KeyDown:
+			outputView.ScrollTo(row+1, col)
+			return nil
+		case tcell.KeyUp:
+			if row > 0 {
+				outputView.ScrollTo(row-1, col)
+			}
+			return nil
+		case tcell.KeyPgDn:
+			outputView.ScrollTo(row+10, col)
+			return nil
+		case tcell.KeyPgUp:
+			if row >= 10 {
+				outputView.ScrollTo(row-10, col)
+			} else {
+				outputView.ScrollToBeginning()
+			}
+			return nil
+		}
+
 		if event.Rune() == 'q' || event.Rune() == 'Q' {
 			ui.app.SetRoot(ui.root, true)
 			return nil
 		}
+
 		return event
 	})
 
+	go func() {
+		err := executor.ExecuteScript(scriptContent, func(line string) {
+			ui.app.QueueUpdateDraw(func() {
+				fmt.Fprintln(outputView, tview.TranslateANSI(line))
+				outputView.ScrollToEnd() // Automatically scroll to the end
+			})
+		})
+		if err != nil {
+			ui.app.QueueUpdateDraw(func() {
+				fmt.Fprintf(outputView, "[red]Execution failed: %v", err)
+				outputView.ScrollToEnd()
+			})
+		}
+	}()
+
 	ui.app.SetRoot(outputView, true)
 }
+
+
 
 func launchEditor(app *tview.Application, initialContent string) (string, error) {
 	// Suspend the tview Application (restore terminal state)
