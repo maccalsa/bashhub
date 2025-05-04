@@ -9,13 +9,14 @@ type Script struct {
 	Name        string `db:"name"`
 	Description string `db:"description"`
 	Content     string `db:"content"`
+	Category    string `db:"category"`
 }
 
 // CreateScript adds a new script to the database
 func CreateScript(db *sqlx.DB, script Script) error {
 	_, err := db.Exec(
-		"INSERT INTO scripts (name, description, content) VALUES (?, ?, ?)",
-		script.Name, script.Description, script.Content,
+		"INSERT INTO scripts (name, description, content, category) VALUES (?, ?, ?, ?)",
+		script.Name, script.Description, script.Content, script.Category,
 	)
 	return err
 }
@@ -27,11 +28,17 @@ func GetScripts(db *sqlx.DB) ([]Script, error) {
 	return scripts, err
 }
 
+func GetScriptByID(db *sqlx.DB, id int64) (Script, error) {
+	var script Script
+	err := db.Get(&script, "SELECT * FROM scripts WHERE id=?", id)
+	return script, err
+}
+
 // UpdateScript updates an existing script
 func UpdateScript(db *sqlx.DB, script Script) error {
 	_, err := db.Exec(
-		"UPDATE scripts SET name=?, description=?, content=? WHERE id=?",
-		script.Name, script.Description, script.Content, script.ID,
+		"UPDATE scripts SET name=?, description=?, content=?, category=? WHERE id=?",
+		script.Name, script.Description, script.Content, script.Category, script.ID,
 	)
 	return err
 }

@@ -23,6 +23,7 @@ type UI struct {
 	root    tview.Primitive // root primitive
 	footer  *tview.TextView  // clearly added footer
 	inForm  bool
+	listItemIDs map[int]int64  // clearly maps list index to script ID
 }
 
 func NewUI(db *sqlx.DB) *UI {
@@ -31,6 +32,7 @@ func NewUI(db *sqlx.DB) *UI {
 		db:      db,
 		list:    tview.NewList().ShowSecondaryText(true),
 		details: tview.NewTextView(),
+		listItemIDs: make(map[int]int64),
 	}
 
 	ui.details.
@@ -48,15 +50,13 @@ func NewUI(db *sqlx.DB) *UI {
 	ui.footer = tview.NewTextView()
 	ui.footer.SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter).
-		SetText("[yellow]Tab[white]: Switch Pane | [green]C[white]: Create Script | [red]D[white]: Delete Script | [blue]E[white]: Execute Script | [cyan]Ctrl+Q[white]: Quit")
+		SetText("[yellow]Tab[white]: Switch Pane | [green]C[white]: Create Script | [orange]X[white]: Edit Script | [red]D[white]: Delete Script | [blue]E[white]: Execute Script | [cyan]Ctrl+Q[white]: Quit")
 
 	// Call SetBorder separately to avoid type mismatch
 	ui.footer.SetBorder(true).SetBorderColor(tcell.ColorGray)
 
 	return ui
 }
-
-
 
 func (ui *UI) loadScripts() {
 	scripts, err := database.GetScripts(ui.db)
@@ -66,6 +66,7 @@ func (ui *UI) loadScripts() {
 	}
 
 	ui.list.Clear()
+	ui.listItemIDs = make(map[int]int64) // reset clearly on reload
 
 	if len(scripts) == 0 {
 		ui.list.AddItem("No scripts found", "", 0, nil)
@@ -73,21 +74,32 @@ func (ui *UI) loadScripts() {
 		return
 	}
 
-	for idx, script := range scripts {
-		script := script // capture loop variable
-		ui.list.AddItem(script.Name, script.Description, 0, func() {
-		ui.details.Clear()
-		ui.details.
-			SetDynamicColors(true).
-			SetRegions(true).
-			SetWrap(true).
-			SetText(tview.TranslateANSI(highlightCode(script.Content, "bash")))
-		})
-		if idx == 0 {
-			ui.details.SetText(fmt.Sprintf("[yellow]%s\n\n[white]%s", script.Name, script.Content))
+	catMap := make(map[string][]database.Script)
+	for _, script := range scripts {
+		catMap[script.Category] = append(catMap[script.Category], script)
+	}
+
+	for category, scripts := range catMap {
+		ui.list.AddItem(fmt.Sprintf("[::b][+] %s", category), "", 0, nil)
+
+		for _, script := range scripts {
+			script := script
+
+			index := ui.list.GetItemCount()
+			ui.list.AddItem("  "+script.Name, script.Description, 0, func() {
+				ui.details.Clear()
+				ui.details.
+					SetDynamicColors(true).
+					SetRegions(true).
+					SetWrap(true).
+					SetText(tview.TranslateANSI(highlightCode(script.Content, "bash")))
+			})
+
+			ui.listItemIDs[index] = script.ID // explicitly map index → ID clearly
 		}
 	}
 }
+
 
 func (ui *UI) confirmDeleteScript() {
 	index := ui.list.GetCurrentItem()
@@ -117,6 +129,75 @@ func (ui *UI) confirmDeleteScript() {
 	ui.app.SetRoot(modal, false)
 }
 
+func (ui *UI) showEditForm() {
+	index := ui.list.GetCurrentItem()
+	if index < 0 {
+		return
+	}
+
+	scriptID, ok := ui.listItemIDs[index]
+	if !ok {
+		ui.details.SetText("[red]Cannot edit category header. Please select a valid script.")
+		return
+	}
+
+	script, err := database.GetScriptByID(ui.db, scriptID)
+	if err != nil {
+		ui.details.SetText("[red]Failed to load script for editing.")
+		return
+	}
+
+	ui.inForm = true
+	form := tview.NewForm()
+	scriptContent := script.Content
+
+	form.
+		AddInputField("Name", script.Name, 20, nil, nil).
+		AddInputField("Description", script.Description, 40, nil, nil).
+		AddInputField("Category", script.Category, 20, nil, nil).
+		AddButton("Edit Content", func() {
+			content, err := launchEditor(ui.app, scriptContent)
+			if err != nil {
+				ui.details.SetText(fmt.Sprintf("[red]Editor error: %v", err))
+			} else {
+				scriptContent = content
+				form.GetButton(form.GetButtonCount()-3).SetLabel("Edit Content ✔️")
+			}
+		}).
+		AddButton("Save", func() {
+			name := form.GetFormItemByLabel("Name").(*tview.InputField).GetText()
+			description := form.GetFormItemByLabel("Description").(*tview.InputField).GetText()
+			category := form.GetFormItemByLabel("Category").(*tview.InputField).GetText()
+
+			if scriptContent == "" {
+				ui.details.SetText("[red]Script content cannot be empty. Please edit script content first.")
+				return
+			}
+
+			script.Name = name
+			script.Description = description
+			script.Category = category
+			script.Content = scriptContent
+
+			if err := database.UpdateScript(ui.db, script); err != nil {
+				ui.details.SetText(fmt.Sprintf("[red]Failed to update script: %v", err))
+			} else {
+				ui.loadScripts()
+				ui.details.SetText("[green]Script updated successfully.")
+			}
+			ui.inForm = false
+			ui.app.SetRoot(ui.root, true)
+		}).
+		AddButton("Cancel", func() {
+			ui.inForm = false
+			ui.app.SetRoot(ui.root, true)
+		})
+
+	form.SetBorder(true).SetTitle("Edit Script").SetTitleAlign(tview.AlignLeft)
+	ui.app.SetRoot(form, true)
+}
+
+
 
 func (ui *UI) showCreateForm() {
 	ui.inForm = true
@@ -128,6 +209,7 @@ func (ui *UI) showCreateForm() {
 	form.
 		AddInputField("Name", "", 20, nil, nil).
 		AddInputField("Description", "", 40, nil, nil).
+		AddInputField("Category", "General", 20, nil, nil). // clearly added category
 		AddButton("Edit Content", func() {
 			// After editing completes, your TUI restores control, completely avoiding the terminal output leak.
 			content, err := launchEditor(ui.app, scriptContent)
@@ -141,14 +223,21 @@ func (ui *UI) showCreateForm() {
 		AddButton("Save", func() {
 			name := form.GetFormItemByLabel("Name").(*tview.InputField).GetText()
 			description := form.GetFormItemByLabel("Description").(*tview.InputField).GetText()
-
+			category := form.GetFormItemByLabel("Category").(*tview.InputField).GetText()
+			
 			if scriptContent == "" {
 				ui.inForm = false
 				ui.details.SetText("[red]Script content cannot be empty. Please edit script content first.")
 				return
 			}
 
-			script := database.Script{Name: name, Description: description, Content: scriptContent}
+			script := database.Script{
+				Name: name, 
+				Description: description, 
+				Content: scriptContent,
+				Category: category,
+			}
+
 			if err := database.CreateScript(ui.db, script); err != nil {
 				ui.details.SetText(fmt.Sprintf("[red]Failed to create script: %v", err))
 			} else {
@@ -217,6 +306,9 @@ func (ui *UI) Run() error {
 				ui.confirmDeleteScript()
 			case 'E', 'e':
 				ui.executeSelectedScript()
+			case 'X', 'x':
+				ui.showEditForm() // clearly new Edit action
+				return nil
 			}
 
 			return event
