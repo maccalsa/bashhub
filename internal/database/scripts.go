@@ -35,6 +35,12 @@ func GetScriptByID(db *sqlx.DB, id int64) (Script, error) {
 	return script, err
 }
 
+func GetScriptByName(db *sqlx.DB, name string) (Script, error) {
+	var script Script
+	err := db.Get(&script, "SELECT * FROM scripts WHERE name=?", name)
+	return script, err
+}
+
 // UpdateScript updates an existing script
 func UpdateScript(db *sqlx.DB, script Script) error {
 	_, err := db.Exec(
