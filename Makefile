@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 .PHONY: run build install clean version patch minor major
 
 run:
