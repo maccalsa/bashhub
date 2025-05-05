@@ -49,7 +49,7 @@ func NewUI(db *sqlx.DB) *UI {
 	ui.footer = tview.NewTextView()
 	ui.footer.SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter).
-		SetText("[yellow]Tab[white]: Switch Pane | [green]C[white]: Create Script | [orange]X[white]: Edit Script | [red]D[white]: Delete Script | [blue]E[white]: Execute Script | [cyan]Ctrl+Q[white]: Quit")
+		SetText("[yellow]Tab[white]: Switch Pane | [yellow]↑/↓[white]: Navigate Tree | [yellow]PgUp/PgDn[white]: Scroll Tree |\n [green]C[white]: Create | [blue]E[white]: Edit | [red]D[white]: Delete | [orange]X[white]: Execute | [cyan]Ctrl+Q[white]: Quit")
 
 	ui.footer.SetBorder(true).SetBorderColor(tcell.ColorGray)
 
@@ -71,7 +71,7 @@ func (ui *UI) Run() error {
 
 	ui.root = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(mainLayout, 0, 1, true).
-		AddItem(ui.footer, 3, 0, false)
+		AddItem(ui.footer, 4, 0, false)
 
 	ui.app.SetFocus(ui.tree)
 
@@ -142,10 +142,10 @@ func (ui *UI) Run() error {
 			ui.confirmDeleteScript()
 			return nil
 		case 'E', 'e':
-			ui.executeSelectedScript()
+			ui.showEditForm()
 			return nil
 		case 'X', 'x':
-			ui.showEditForm()
+			ui.executeSelectedScript()
 			return nil
 		}
 
@@ -154,8 +154,6 @@ func (ui *UI) Run() error {
 
 	return ui.app.SetRoot(ui.root, true).Run()
 }
-
-
 
 func (ui *UI) executeSelectedScript() {
 	node := ui.tree.GetCurrentNode()
@@ -180,27 +178,6 @@ func (ui *UI) executeSelectedScript() {
 	}
 }
 
-
-func (ui *UI) promptPlaceholderInputs(script database.Script, placeholders []string) {
-	inputs := make(map[string]string)
-	form := tview.NewForm()
-
-	for _, ph := range placeholders {
-		form.AddInputField(ph, "", 30, nil, func(text string) {
-			inputs[ph] = text
-		})
-	}
-
-	form.AddButton("Run", func() {
-		finalScript := executor.ReplacePlaceholders(script.Content, inputs)
-		ui.runAndDisplay(finalScript)
-	}).AddButton("Cancel", func() {
-		ui.app.SetRoot(ui.root, true)
-	})
-
-	form.SetBorder(true).SetTitle("Fill placeholders").SetTitleAlign(tview.AlignLeft)
-	ui.app.SetRoot(form, true)
-}
 
 func (ui *UI) runAndDisplay(scriptContent string) {
 	outputView := tview.NewTextView()
