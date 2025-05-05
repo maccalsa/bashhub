@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"bufio"
@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/maccalsa/bashhub/internal/database"
 	"github.com/maccalsa/bashhub/internal/executor"
+	"github.com/spf13/cobra"
 )
 
 var placeholderInputs []string

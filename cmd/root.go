@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"log"
@@ -21,7 +21,7 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func main() {
+func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal(err)
 	}
