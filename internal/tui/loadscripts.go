@@ -2,12 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"strings"
+
+	"sort"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/maccalsa/bashhub/internal/database"
 	"github.com/rivo/tview"
 )
-
 
 func (ui *UI) loadScripts() {
 	rootNode := tview.NewTreeNode("Scripts").SetColor(tcell.ColorYellow)
@@ -24,16 +26,31 @@ func (ui *UI) loadScripts() {
 		catMap[script.Category] = append(catMap[script.Category], script)
 	}
 
-	for category, scripts := range catMap {
+	// Extract categories and sort explicitly (case-insensitive)
+	var categories []string
+	for category := range catMap {
+		categories = append(categories, category)
+	}
+	sort.Slice(categories, func(i, j int) bool {
+		return strings.ToLower(categories[i]) < strings.ToLower(categories[j])
+	})
+
+	for _, category := range categories {
+		// explicitly sort scripts within category
+		sort.Slice(catMap[category], func(i, j int) bool {
+			return strings.ToLower(catMap[category][i].Name) < strings.ToLower(catMap[category][j].Name)
+		})
+
 		catNode := tview.NewTreeNode(category).
 			SetColor(tcell.ColorGreen)
 
-		for _, script := range scripts {
+		for _, script := range catMap[category] {
 			script := script // capture clearly
 			scriptNode := tview.NewTreeNode(script.Name).
 				SetReference(script).
 				SetColor(tcell.ColorWhite).
 				SetSelectable(true)
+
 			catNode.AddChild(scriptNode)
 		}
 		rootNode.AddChild(catNode)
