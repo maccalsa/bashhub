@@ -3,10 +3,12 @@ package tui
 import (
 	"strings"
 
+	"fmt"
+	"sort"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/maccalsa/bashhub/internal/database"
 	"github.com/rivo/tview"
-	"fmt"
 )
 
 func (ui *UI) filterScripts(query string) {
@@ -21,24 +23,32 @@ func (ui *UI) filterScripts(query string) {
 
 	query = strings.ToLower(query)
 
-	// First group scripts by category clearly
+	// First group scripts clearly by category
 	catMap := make(map[string][]database.Script)
 	for _, script := range scripts {
 		catMap[script.Category] = append(catMap[script.Category], script)
 	}
 
-	for category, scripts := range catMap {
-		categoryLower := strings.ToLower(category)
+	// Extract and sort categories explicitly (case insensitive)
+	var categories []string
+	for category := range catMap {
+		categories = append(categories, category)
+	}
+	sort.Slice(categories, func(i, j int) bool {
+		return strings.ToLower(categories[i]) < strings.ToLower(categories[j])
+	})
 
+	for _, category := range categories {
+		categoryLower := strings.ToLower(category)
 		var matchingScripts []database.Script
 
-		// Check if category matches
+		// Check if category matches query
 		if strings.Contains(categoryLower, query) {
-			// if category matches, clearly add ALL scripts in category
-			matchingScripts = scripts
+			// clearly include all scripts in matching category
+			matchingScripts = catMap[category]
 		} else {
-			// else, clearly add only scripts matching query
-			for _, script := range scripts {
+			// explicitly filter scripts matching query clearly
+			for _, script := range catMap[category] {
 				if strings.Contains(strings.ToLower(script.Name), query) ||
 					strings.Contains(strings.ToLower(script.Description), query) {
 					matchingScripts = append(matchingScripts, script)
@@ -47,6 +57,11 @@ func (ui *UI) filterScripts(query string) {
 		}
 
 		if len(matchingScripts) > 0 {
+			// explicitly sort scripts clearly within category
+			sort.Slice(matchingScripts, func(i, j int) bool {
+				return strings.ToLower(matchingScripts[i].Name) < strings.ToLower(matchingScripts[j].Name)
+			})
+
 			catNode := tview.NewTreeNode(category).SetColor(tcell.ColorGreen)
 			for _, script := range matchingScripts {
 				script := script // capture clearly
