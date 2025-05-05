@@ -2,17 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/jmoiron/sqlx"
-	"github.com/rivo/tview"
 	"github.com/maccalsa/bashhub/internal/database"
 	"github.com/maccalsa/bashhub/internal/executor"
-	"os"
-	"os/exec"
-	"github.com/alecthomas/chroma/v2/formatters"
-	"github.com/alecthomas/chroma/v2/lexers"
-	"github.com/alecthomas/chroma/v2/styles"
-	"bytes"
+	"github.com/rivo/tview"
 )
 
 type UI struct {
@@ -23,6 +19,9 @@ type UI struct {
 	root    tview.Primitive // root primitive
 	footer  *tview.TextView  // clearly added footer
 	inForm  bool
+	searching bool
+	searchBox *tview.InputField
+	searchContainer *tview.Flex
 }
 
 func NewUI(db *sqlx.DB) *UI {
@@ -31,6 +30,10 @@ func NewUI(db *sqlx.DB) *UI {
 		db:      db,
 		tree:    tview.NewTreeView(),
 		details: tview.NewTextView().SetDynamicColors(true),
+		searchBox: tview.NewInputField().
+			SetLabel("🔍 Search: ").
+			SetFieldWidth(30),
+		searchContainer: tview.NewFlex().SetDirection(tview.FlexRow),
 	}
 
 	ui.tree.SetBorder(true).SetTitle(" Scripts ")
@@ -46,214 +49,17 @@ func NewUI(db *sqlx.DB) *UI {
 	return ui
 }
 
-func (ui *UI) loadScripts() {
-	rootNode := tview.NewTreeNode("Scripts").SetColor(tcell.ColorYellow)
-	ui.tree.SetRoot(rootNode).SetCurrentNode(rootNode)
-
-	scripts, err := database.GetScripts(ui.db)
-	if err != nil {
-		ui.details.SetText(fmt.Sprintf("[red]Error loading scripts: %v", err))
-		return
-	}
-
-	catMap := make(map[string][]database.Script)
-	for _, script := range scripts {
-		catMap[script.Category] = append(catMap[script.Category], script)
-	}
-
-	for category, scripts := range catMap {
-		catNode := tview.NewTreeNode(category).
-			SetColor(tcell.ColorGreen)
-
-		for _, script := range scripts {
-			script := script // capture clearly
-			scriptNode := tview.NewTreeNode(script.Name).
-				SetReference(script).
-				SetColor(tcell.ColorWhite).
-				SetSelectable(true)
-			catNode.AddChild(scriptNode)
-		}
-		rootNode.AddChild(catNode)
-	}
-
-	ui.tree.SetSelectedFunc(func(node *tview.TreeNode) {
-		ref := node.GetReference()
-		if ref == nil {
-			node.SetExpanded(!node.IsExpanded())
-		} else {
-			script := ref.(database.Script)
-			ui.details.SetText(highlightCode(script.Content, script.Language))
-		}
-	})
-}
-
-func (ui *UI) confirmDeleteScript() {
-	node := ui.tree.GetCurrentNode()
-	if node == nil {
-		return
-	}
-
-	ref := node.GetReference()
-	if ref == nil {
-		ui.details.SetText("[red]Cannot delete category. Please select a script.")
-		return
-	}
-
-	script := ref.(database.Script)
-
-	modal := tview.NewModal().
-		SetText(fmt.Sprintf("Delete script '%s'?", script.Name)).
-		AddButtons([]string{"Cancel", "Delete"}).
-		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			if buttonLabel == "Delete" {
-				if err := database.DeleteScript(ui.db, script.ID); err != nil {
-					ui.details.SetText(fmt.Sprintf("[red]Failed to delete script: %v", err))
-				} else {
-					ui.loadScripts()
-					ui.details.SetText("[green]Script deleted successfully.")
-				}
-			}
-			ui.app.SetRoot(ui.root, true)
-		})
-
-	ui.app.SetRoot(modal, false)
-}
-
-
-func (ui *UI) showEditForm() {
-	node := ui.tree.GetCurrentNode()
-	if node == nil {
-		return
-	}
-
-	ref := node.GetReference()
-	if ref == nil {
-		ui.details.SetText("[red]Cannot edit category. Please select a script.")
-		return
-	}
-
-	script := ref.(database.Script)
-
-	ui.inForm = true
-	form := tview.NewForm()
-	scriptContent := script.Content
-
-	form.
-		AddInputField("Name", script.Name, 20, nil, nil).
-		AddInputField("Description", script.Description, 40, nil, nil).
-		AddInputField("Category", script.Category, 20, nil, nil).
-		AddButton("Edit Content", func() {
-			content, err := launchEditor(ui.app, scriptContent)
-			if err != nil {
-				ui.details.SetText(fmt.Sprintf("[red]Editor error: %v", err))
-			} else {
-				scriptContent = content
-				form.GetButton(form.GetButtonCount()-3).SetLabel("Edit Content ✔️")
-			}
-		}).
-		AddButton("Save", func() {
-			name := form.GetFormItemByLabel("Name").(*tview.InputField).GetText()
-			description := form.GetFormItemByLabel("Description").(*tview.InputField).GetText()
-			category := form.GetFormItemByLabel("Category").(*tview.InputField).GetText()
-
-			if scriptContent == "" {
-				ui.details.SetText("[red]Script content cannot be empty. Please edit script content first.")
-				return
-			}
-
-			script.Name = name
-			script.Description = description
-			script.Category = category
-			script.Content = scriptContent
-			script.Language = DetectLanguage(scriptContent)
-
-			if err := database.UpdateScript(ui.db, script); err != nil {
-				ui.details.SetText(fmt.Sprintf("[red]Failed to update script: %v", err))
-			} else {
-				ui.loadScripts()
-				ui.details.SetText("[green]Script updated successfully.")
-			}
-			ui.inForm = false
-			ui.app.SetRoot(ui.root, true)
-		}).
-		AddButton("Cancel", func() {
-			ui.inForm = false
-			ui.app.SetRoot(ui.root, true)
-		})
-
-	form.SetBorder(true).SetTitle("Edit Script").SetTitleAlign(tview.AlignLeft)
-	ui.app.SetRoot(form, true)
-}
-
-
-
-
-func (ui *UI) showCreateForm() {
-	ui.inForm = true
-
-	var scriptContent string // temporarily store edited content here
-
-	form := tview.NewForm()
-
-	form.
-		AddInputField("Name", "", 20, nil, nil).
-		AddInputField("Description", "", 40, nil, nil).
-		AddInputField("Category", "General", 20, nil, nil). // clearly added category
-		AddButton("Edit Content", func() {
-			// After editing completes, your TUI restores control, completely avoiding the terminal output leak.
-			content, err := launchEditor(ui.app, scriptContent)
-			if err != nil {
-				ui.details.SetText(fmt.Sprintf("[red]Editor error: %v", err))
-			} else {
-				scriptContent = content
-				form.GetButton(form.GetButtonCount()-3).SetLabel("Edit Content ✔️")
-			}
-		}).
-		AddButton("Save", func() {
-			name := form.GetFormItemByLabel("Name").(*tview.InputField).GetText()
-			description := form.GetFormItemByLabel("Description").(*tview.InputField).GetText()
-			category := form.GetFormItemByLabel("Category").(*tview.InputField).GetText()
-			
-			if scriptContent == "" {
-				ui.inForm = false
-				ui.details.SetText("[red]Script content cannot be empty. Please edit script content first.")
-				return
-			}
-
-		    language := DetectLanguage(scriptContent) // automatic detection clearly here
-
-
-			script := database.Script{
-				Name: name, 
-				Description: description, 
-				Content: scriptContent,
-				Category: category,
-				Language: language,
-			}
-
-			if err := database.CreateScript(ui.db, script); err != nil {
-				ui.details.SetText(fmt.Sprintf("[red]Failed to create script: %v", err))
-			} else {
-				ui.loadScripts()
-				ui.details.SetText("[green]Script created successfully.")
-			}
-			ui.inForm = false
-			ui.app.SetRoot(ui.root, true)
-		}).
-		AddButton("Cancel", func() {
-			ui.inForm = false
-			ui.app.SetRoot(ui.root, true)
-		})
-
-	form.SetBorder(true).SetTitle("New Script").SetTitleAlign(tview.AlignLeft)
-	ui.app.SetRoot(form, true)
-}
 
 func (ui *UI) Run() error {
 	ui.loadScripts()
 
+	ui.searchBox.SetBorder(true).SetBorderColor(tcell.ColorGray)
+
+	ui.searchContainer.Clear().
+		AddItem(ui.tree, 0, 1, true)
+
 	mainLayout := tview.NewFlex().
-		AddItem(ui.tree, 0, 1, true).
+		AddItem(ui.searchContainer, 0, 1, true).
 		AddItem(ui.details, 0, 2, false)
 
 	ui.root = tview.NewFlex().SetDirection(tview.FlexRow).
@@ -266,6 +72,23 @@ func (ui *UI) Run() error {
 		if ui.inForm {
 			return event
 		}
+
+		if ui.searching {
+			if event.Key() == tcell.KeyEsc {
+				ui.searching = false
+				ui.searchBox.SetText("")
+				ui.searchContainer.Clear() // remove search box clearly
+				ui.searchContainer.AddItem(ui.tree, 0, 1, true)
+				ui.loadScripts()
+				ui.app.SetFocus(ui.tree)
+				return nil
+			}
+			return event
+		}
+
+		ui.searchBox.SetChangedFunc(func(text string) {
+			ui.filterScripts(text)
+		})
 
 		switch event.Key() {
 		case tcell.KeyCtrlQ:
@@ -285,9 +108,19 @@ func (ui *UI) Run() error {
 				ui.app.SetFocus(ui.details)
 			}
 			return nil
-		}	
+		}
 
 		switch event.Rune() {
+		case '/':
+			if !ui.searching {
+				ui.searching = true
+				ui.searchContainer.Clear() // clearly reset container
+				ui.searchContainer.
+					AddItem(ui.searchBox, 3, 0, true). // show searchBox
+					AddItem(ui.tree, 0, 1, true)
+				ui.app.SetFocus(ui.searchBox)
+			}
+			return nil
 		case 'C', 'c':
 			ui.showCreateForm()
 			return nil
@@ -307,6 +140,7 @@ func (ui *UI) Run() error {
 
 	return ui.app.SetRoot(ui.root, true).Run()
 }
+
 
 
 func (ui *UI) executeSelectedScript() {
@@ -418,83 +252,33 @@ func (ui *UI) runAndDisplay(scriptContent string) {
 	ui.app.SetRoot(outputView, true)
 }
 
+func (ui *UI) filterScripts(query string) {
+	rootNode := tview.NewTreeNode(fmt.Sprintf("Search: '%s'", query)).SetColor(tcell.ColorYellow)
+	ui.tree.SetRoot(rootNode).SetCurrentNode(rootNode)
 
+	scripts, err := database.GetScripts(ui.db)
+	if err != nil {
+		ui.details.SetText(fmt.Sprintf("[red]Error loading scripts: %v", err))
+		return
+	}
 
-func launchEditor(app *tview.Application, initialContent string) (string, error) {
-	// Suspend the tview Application (restore terminal state)
-	app.Suspend(func() {
-		tmpfile, err := os.CreateTemp("", "bashhub-*.sh")
-		if err != nil {
-			return
+	query = strings.ToLower(query)
+	for _, script := range scripts {
+		if strings.Contains(strings.ToLower(script.Name), query) ||
+			strings.Contains(strings.ToLower(script.Description), query) {
+			scriptNode := tview.NewTreeNode(script.Name).
+				SetReference(script).
+				SetColor(tcell.ColorWhite)
+			rootNode.AddChild(scriptNode)
 		}
-		defer os.Remove(tmpfile.Name())
+	}
 
-		tmpfile.Write([]byte(initialContent))
-		tmpfile.Close()
-
-		editor := os.Getenv("EDITOR")
-		if editor == "" {
-			editor = "nano" // default fallback
+	ui.tree.SetSelectedFunc(func(node *tview.TreeNode) {
+		ref := node.GetReference()
+		if ref != nil {
+			script := ref.(database.Script)
+			ui.details.SetText(highlightCode(script.Content, script.Language))
 		}
-
-		cmd := exec.Command(editor, tmpfile.Name())
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		if err := cmd.Run(); err != nil {
-			return
-		}
-
-		updatedContent, err := os.ReadFile(tmpfile.Name())
-		if err != nil {
-			return
-		}
-
-		initialContent = string(updatedContent)
 	})
-
-	return initialContent, nil
 }
 
-func highlightCode(code, language string) string {
-	lexer := lexers.Get(language)
-	if lexer == nil {
-		lexer = lexers.Fallback
-	}
-
-	style := styles.Get("monokai")
-	if style == nil {
-		style = styles.Fallback
-	}
-
-	// Explicitly switch to the robust terminal256 formatter for broader compatibility.
-	formatter := formatters.Get("terminal256")
-	if formatter == nil {
-		formatter = formatters.Fallback
-	}
-
-	iterator, err := lexer.Tokenise(nil, code)
-	if err != nil {
-		return code
-	}
-
-	var buff bytes.Buffer
-	err = formatter.Format(&buff, style, iterator)
-	if err != nil {
-		return code
-	}
-
-	return tview.TranslateANSI(buff.String())
-}
-
-func DetectLanguage(scriptContent string) string {
-    lexer := lexers.Analyse(scriptContent)
-    if lexer == nil {
-        lexer = lexers.Match(scriptContent)
-    }
-    if lexer == nil {
-        return "bash" // clearly fallback to bash
-    }
-    return lexer.Config().Name
-}
