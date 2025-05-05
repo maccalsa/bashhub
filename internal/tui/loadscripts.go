@@ -58,11 +58,17 @@ func (ui *UI) loadScripts() {
 
 	ui.tree.SetSelectedFunc(func(node *tview.TreeNode) {
 		ref := node.GetReference()
-		if ref == nil {
-			node.SetExpanded(!node.IsExpanded())
-		} else {
+		if ref != nil {
 			script := ref.(database.Script)
-			ui.details.SetText(highlightCode(script.Content, script.Language))
+			ui.details.Clear().
+				SetDynamicColors(true).
+				SetRegions(true).
+				SetWrap(true)
+
+			details := fmt.Sprintf("[yellow]Description:[white] %s\n\n%s", script.Description, highlightCode(script.Content, script.Language))
+			ui.details.SetText(details)
+		} else {
+			node.SetExpanded(!node.IsExpanded())
 		}
 	})
 }
