@@ -32,9 +32,17 @@ func NewUI(db *sqlx.DB) *UI {
 		details: tview.NewTextView().SetDynamicColors(true),
 		searchBox: tview.NewInputField().
 			SetLabel("🔍 Search: ").
-			SetFieldWidth(30),
+			SetFieldWidth(20).
+			SetFieldBackgroundColor(tcell.ColorBlack).
+			SetLabelColor(tcell.ColorYellow).
+			SetFieldTextColor(tcell.ColorWhite),
 		searchContainer: tview.NewFlex().SetDirection(tview.FlexRow),
 	}
+
+	ui.searchBox.
+		SetBorder(true).
+		SetBorderPadding(0, 0, 1, 1).
+		SetBorderColor(tcell.ColorGray)
 
 	ui.tree.SetBorder(true).SetTitle(" Scripts ")
 	ui.details.SetBorder(true).SetTitle(" Details (↑/↓ Scroll) ")
@@ -74,12 +82,19 @@ func (ui *UI) Run() error {
 		}
 
 		if ui.searching {
-			if event.Key() == tcell.KeyEsc {
+			switch event.Key() {
+			case tcell.KeyEsc:
 				ui.searching = false
 				ui.searchBox.SetText("")
-				ui.searchContainer.Clear() // remove search box clearly
+				ui.searchContainer.Clear()
 				ui.searchContainer.AddItem(ui.tree, 0, 1, true)
 				ui.loadScripts()
+				ui.app.SetFocus(ui.tree)
+				return nil
+			case tcell.KeyEnter:
+				ui.searching = false
+				ui.searchContainer.Clear()
+				ui.searchContainer.AddItem(ui.tree, 0, 1, true)
 				ui.app.SetFocus(ui.tree)
 				return nil
 			}
