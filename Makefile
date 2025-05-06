@@ -3,10 +3,10 @@ SHELL := /bin/bash
 .PHONY: run build install clean version patch minor major
 
 run:
-	go run ./cmd/bashhub
+	go run ./bashhub.go
 
 build:
-	go build -o bashhub ./cmd/bashhub
+	go build -o bashhub ./bashhub
 
 install: build
 	cp bashhub $(GOPATH)/bin/bashhub

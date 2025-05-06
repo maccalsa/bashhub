@@ -9,6 +9,7 @@ import (
 
 func (ui *UI) confirmDeleteScript() {
 	node := ui.tree.GetCurrentNode()
+	ui.inForm = true
 	if node == nil {
 		return
 	}
@@ -33,6 +34,7 @@ func (ui *UI) confirmDeleteScript() {
 					ui.details.SetText("[green]Script deleted successfully.")
 				}
 			}
+			ui.inForm = false
 			ui.app.SetRoot(ui.root, true)
 		})
 
